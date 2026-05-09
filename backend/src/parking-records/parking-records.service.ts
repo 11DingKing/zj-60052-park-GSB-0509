@@ -1,11 +1,16 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { SpotStatus, ParkingRecordStatus, Zone, MonthlyCard } from '@prisma/client';
-import { EntryDto } from './dto/entry.dto';
-import { ExitDto } from './dto/exit.dto';
-import { SpotsService } from '../spots/spots.service';
-import { MonthlyCardsService } from '../monthly-cards/monthly-cards.service';
-import { ParkingService } from '../parking/parking.service';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { SpotStatus, ParkingRecordStatus } from "@prisma/client";
+import { EntryDto } from "./dto/entry.dto";
+import { ExitDto } from "./dto/exit.dto";
+import { SpotsService } from "../spots/spots.service";
+import { MonthlyCardsService } from "../monthly-cards/monthly-cards.service";
+import { ParkingService } from "../parking/parking.service";
+import { PricingService } from "./pricing.service";
 
 @Injectable()
 export class ParkingRecordsService {
@@ -14,15 +19,19 @@ export class ParkingRecordsService {
     private spotsService: SpotsService,
     private monthlyCardsService: MonthlyCardsService,
     private parkingService: ParkingService,
+    private pricingService: PricingService,
   ) {}
 
-  async findAll(status?: ParkingRecordStatus, plateNumber?: string): Promise<any[]> {
+  async findAll(
+    status?: ParkingRecordStatus,
+    plateNumber?: string,
+  ): Promise<any[]> {
     const where: any = {};
     if (status) where.status = status;
     if (plateNumber) {
       where.plateNumber = {
         contains: plateNumber,
-        mode: 'insensitive',
+        mode: "insensitive",
       };
     }
 
@@ -33,7 +42,7 @@ export class ParkingRecordsService {
           include: { zone: true },
         },
       },
-      orderBy: { entryTime: 'desc' },
+      orderBy: { entryTime: "desc" },
       take: 100,
     });
   }
@@ -48,7 +57,7 @@ export class ParkingRecordsService {
       },
     });
     if (!record) {
-      throw new NotFoundException('停车记录不存在');
+      throw new NotFoundException("停车记录不存在");
     }
     return record;
   }
@@ -56,7 +65,7 @@ export class ParkingRecordsService {
   async findCurrentParking(plateNumber: string): Promise<any> {
     return this.prisma.parkingRecord.findFirst({
       where: {
-        plateNumber: { equals: plateNumber, mode: 'insensitive' },
+        plateNumber: { equals: plateNumber, mode: "insensitive" },
         status: ParkingRecordStatus.PARKING,
       },
       include: {
@@ -72,15 +81,16 @@ export class ParkingRecordsService {
 
     const existingRecord = await this.findCurrentParking(plateNumber);
     if (existingRecord) {
-      throw new BadRequestException('该车辆已在场内，请先出场');
+      throw new BadRequestException("该车辆已在场内，请先出场");
     }
 
-    const monthlyCard = await this.monthlyCardsService.findByPlateNumber(plateNumber);
+    const monthlyCard =
+      await this.monthlyCardsService.findByPlateNumber(plateNumber);
     const targetZoneId = monthlyCard ? monthlyCard.zoneId : zoneId;
 
     const spot = await this.spotsService.allocateSpot(targetZoneId);
     if (!spot) {
-      throw new BadRequestException('没有可用车位');
+      throw new BadRequestException("没有可用车位");
     }
 
     return this.prisma.$transaction(async (prisma) => {
@@ -109,7 +119,7 @@ export class ParkingRecordsService {
         record,
         spot,
         isMonthly: !!monthlyCard,
-        message: monthlyCard ? '月卡车辆入场' : '临时车辆入场',
+        message: monthlyCard ? "月卡车辆入场" : "临时车辆入场",
       };
     });
   }
@@ -119,30 +129,21 @@ export class ParkingRecordsService {
 
     const record = await this.findCurrentParking(plateNumber);
     if (!record) {
-      throw new NotFoundException('未找到该车辆的停车记录');
+      throw new NotFoundException("未找到该车辆的停车记录");
     }
 
-    const monthlyCard = await this.monthlyCardsService.findByPlateNumber(plateNumber);
+    const monthlyCard =
+      await this.monthlyCardsService.findByPlateNumber(plateNumber);
     const entryTime = record.entryTime;
     const exitTime = new Date();
     const durationMs = exitTime.getTime() - entryTime.getTime();
     const durationMinutes = Math.ceil(durationMs / (1000 * 60));
-    const durationHours = Math.ceil(durationMinutes / 60);
 
-    let amount = 0;
-    let isMonthlyFree = false;
-
-    if (monthlyCard) {
-      isMonthlyFree = true;
-      amount = 0;
-    } else {
-      const zone = record.spot.zone as Zone;
-      if (durationHours <= 1) {
-        amount = zone.firstHourRate;
-      } else {
-        amount = zone.firstHourRate + (durationHours - 1) * zone.subsequentRate;
-      }
-    }
+    const isMonthlyCardUser = !!monthlyCard;
+    const { amount, detail } = this.pricingService.calculate(
+      durationMinutes,
+      isMonthlyCardUser,
+    );
 
     return this.prisma.$transaction(async (prisma) => {
       const updatedRecord = await prisma.parkingRecord.update({
@@ -177,22 +178,12 @@ export class ParkingRecordsService {
         durationHours: Math.ceil(updatedRecord.duration / 60),
         amount: updatedRecord.amount,
         isMonthly: updatedRecord.isMonthly,
-        isMonthlyFree,
-        rateDetail: isMonthlyFree
-          ? '月卡免费'
-          : this.buildRateDetail(updatedRecord.spot.zone as Zone, durationHours),
+        isMonthlyFree: isMonthlyCardUser,
+        rateDetail: detail,
       };
 
       return receipt;
     });
-  }
-
-  private buildRateDetail(zone: Zone, durationHours: number): string {
-    if (durationHours <= 1) {
-      return `首小时 ${zone.firstHourRate} 元`;
-    }
-    const subsequentHours = durationHours - 1;
-    return `首小时 ${zone.firstHourRate} 元 + ${subsequentHours} 小时 × ${zone.subsequentRate} 元/小时 = ${zone.firstHourRate + subsequentHours * zone.subsequentRate} 元`;
   }
 
   async getCurrentParkings(plateNumber?: string): Promise<any[]> {
@@ -202,7 +193,7 @@ export class ParkingRecordsService {
     if (plateNumber) {
       where.plateNumber = {
         contains: plateNumber,
-        mode: 'insensitive',
+        mode: "insensitive",
       };
     }
 
@@ -213,10 +204,10 @@ export class ParkingRecordsService {
           include: { zone: true },
         },
       },
-      orderBy: { entryTime: 'asc' },
+      orderBy: { entryTime: "asc" },
     });
 
-    return records.map(record => {
+    return records.map((record) => {
       const now = new Date();
       const durationMs = now.getTime() - record.entryTime.getTime();
       const durationMinutes = Math.floor(durationMs / (1000 * 60));

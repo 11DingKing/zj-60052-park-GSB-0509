@@ -90,6 +90,7 @@ model Spot {
   updatedAt    DateTime @updatedAt
   zone         Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
   records      ParkingRecord[]
+  reservations Reservation[]
 
   @@unique([zoneId, number])
   @@map("spots")
@@ -127,4 +128,19 @@ model ParkingRecord {
   spot         Spot                 @relation(fields: [spotId], references: [id], onDelete: Cascade)
 
   @@map("parking_records")
+}
+
+model Reservation {
+  id          String   @id @default(uuid())
+  userId      String
+  spotId      String
+  startTime   DateTime
+  endTime     DateTime
+  plateNumber String?
+  status      String   @default("ACTIVE")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  spot        Spot     @relation(fields: [spotId], references: [id], onDelete: Cascade)
+
+  @@map("reservations")
 }

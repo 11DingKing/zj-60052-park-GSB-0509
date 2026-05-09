@@ -1,31 +1,68 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service';
-import { Spot, SpotStatus } from '@prisma/client';
-import { UpdateSpotDto } from './dto/update-spot.dto';
-import { ParkingService } from '../parking/parking.service';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+} from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { Spot, SpotStatus } from "@prisma/client";
+import { UpdateSpotDto } from "./dto/update-spot.dto";
+import { ParkingService } from "../parking/parking.service";
+import { ReservationsService } from "../reservations/reservations.service";
 
 @Injectable()
 export class SpotsService {
   constructor(
     private prisma: PrismaService,
     private parkingService: ParkingService,
+    private reservationsService: ReservationsService,
   ) {}
 
-  async findAll(zoneId?: string, status?: SpotStatus): Promise<Spot[]> {
+  async findAll(zoneId?: string, status?: SpotStatus): Promise<any[]> {
     const where: any = {};
     if (zoneId) where.zoneId = zoneId;
     if (status) where.status = status;
 
-    return this.prisma.spot.findMany({
+    const spots = await this.prisma.spot.findMany({
       where,
       include: {
         zone: true,
         records: {
-          where: { status: 'PARKING' },
+          where: { status: "PARKING" },
         },
       },
-      orderBy: { code: 'asc' },
+      orderBy: { code: "asc" },
     });
+
+    const now = new Date();
+    const bufferedNow = new Date(now.getTime() + 15 * 60 * 1000);
+
+    const enrichedSpots = await Promise.all(
+      spots.map(async (spot) => {
+        if (spot.status === SpotStatus.AVAILABLE) {
+          const activeReservations = await this.prisma.reservation.findMany({
+            where: {
+              spotId: spot.id,
+              status: "ACTIVE",
+              startTime: { lte: bufferedNow },
+              endTime: { gt: now },
+            },
+            orderBy: { startTime: "asc" },
+          });
+
+          if (activeReservations.length > 0) {
+            return {
+              ...spot,
+              isReserved: true,
+              reservations: activeReservations,
+            };
+          }
+        }
+        return { ...spot, isReserved: false, reservations: [] };
+      }),
+    );
+
+    return enrichedSpots;
   }
 
   async findById(id: string): Promise<Spot> {
@@ -37,13 +74,13 @@ export class SpotsService {
           include: {
             spot: { include: { zone: true } },
           },
-          orderBy: { entryTime: 'desc' },
+          orderBy: { entryTime: "desc" },
           take: 10,
         },
       },
     });
     if (!spot) {
-      throw new NotFoundException('车位不存在');
+      throw new NotFoundException("车位不存在");
     }
     return spot;
   }
@@ -59,7 +96,7 @@ export class SpotsService {
       include: {
         zone: true,
       },
-      orderBy: { number: 'asc' },
+      orderBy: { number: "asc" },
     });
   }
 
@@ -72,7 +109,7 @@ export class SpotsService {
     const spots = await this.prisma.spot.findMany({
       where,
       include: { zone: true },
-      orderBy: { number: 'asc' },
+      orderBy: { number: "asc" },
       take: 1,
     });
 
@@ -85,16 +122,19 @@ export class SpotsService {
       include: {
         zone: true,
         records: {
-          where: { status: 'PARKING' },
+          where: { status: "PARKING" },
         },
       },
     });
     if (!spot) {
-      throw new NotFoundException('车位不存在');
+      throw new NotFoundException("车位不存在");
     }
 
-    if (updateSpotDto.status === SpotStatus.MAINTENANCE && spot.records.length > 0) {
-      throw new ConflictException('车位当前有车辆停放，无法设置为维修状态');
+    if (
+      updateSpotDto.status === SpotStatus.MAINTENANCE &&
+      spot.records.length > 0
+    ) {
+      throw new ConflictException("车位当前有车辆停放，无法设置为维修状态");
     }
 
     const updatedSpot = await this.prisma.spot.update({
@@ -129,9 +169,10 @@ export class SpotsService {
 
     const result = {
       total: spots.length,
-      available: spots.filter(s => s.status === SpotStatus.AVAILABLE).length,
-      occupied: spots.filter(s => s.status === SpotStatus.OCCUPIED).length,
-      maintenance: spots.filter(s => s.status === SpotStatus.MAINTENANCE).length,
+      available: spots.filter((s) => s.status === SpotStatus.AVAILABLE).length,
+      occupied: spots.filter((s) => s.status === SpotStatus.OCCUPIED).length,
+      maintenance: spots.filter((s) => s.status === SpotStatus.MAINTENANCE)
+        .length,
     };
 
     return result;

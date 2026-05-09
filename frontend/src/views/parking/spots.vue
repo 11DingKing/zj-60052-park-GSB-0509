@@ -11,6 +11,7 @@
         <el-form-item label="车位状态">
           <el-select v-model="searchForm.status" placeholder="全部状态" clearable>
             <el-option label="空闲" value="AVAILABLE" />
+            <el-option label="已预约" value="RESERVED" />
             <el-option label="占用" value="OCCUPIED" />
             <el-option label="维修" value="MAINTENANCE" />
           </el-select>
@@ -27,6 +28,10 @@
           空闲
         </span>
         <span class="legend-item">
+          <span class="legend-color reserved"></span>
+          已预约
+        </span>
+        <span class="legend-item">
           <span class="legend-color occupied"></span>
           占用
         </span>
@@ -41,10 +46,7 @@
           v-for="spot in filteredSpots"
           :key="spot.id"
           class="spot-item"
-          :class="[
-            `status-${spot.status.toLowerCase()}`,
-            { 'can-toggle': spot.status !== 'OCCUPIED' },
-          ]"
+          :class="getSpotItemClass(spot)"
           @click="handleSpotClick(spot)"
         >
           <span class="spot-code">{{ spot.code }}</span>
@@ -73,41 +75,103 @@
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="getStatusTag(row.status)" size="small">
-              {{ getStatusLabel(row.status) }}
+            <el-tag :type="getEffectiveStatusTag(row)" size="small">
+              {{ getEffectiveStatusLabel(row) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
-            <el-button
-              v-if="row.status === 'AVAILABLE'"
-              type="warning"
-              size="small"
-              @click="toggleMaintenance(row, true)"
-            >
-              设为维修
-            </el-button>
-            <el-button
-              v-else-if="row.status === 'MAINTENANCE'"
-              type="success"
-              size="small"
-              @click="toggleMaintenance(row, false)"
-            >
-              恢复可用
-            </el-button>
-            <el-button
-              v-else
-              type="info"
-              size="small"
-              disabled
-            >
-              占用中
-            </el-button>
+            <template v-if="row.status === 'AVAILABLE' && !row.isReserved">
+              <el-button
+                type="primary"
+                size="small"
+                @click.stop="openReserveDialog(row)"
+              >
+                预约
+              </el-button>
+              <el-button
+                type="warning"
+                size="small"
+                @click="toggleMaintenance(row, true)"
+              >
+                设为维修
+              </el-button>
+            </template>
+            <template v-else-if="row.status === 'AVAILABLE' && row.isReserved">
+              <el-tag type="warning" size="small">已预约</el-tag>
+            </template>
+            <template v-else-if="row.status === 'MAINTENANCE'">
+              <el-button
+                type="success"
+                size="small"
+                @click="toggleMaintenance(row, false)"
+              >
+                恢复可用
+              </el-button>
+            </template>
+            <template v-else>
+              <el-button
+                type="info"
+                size="small"
+                disabled
+              >
+                占用中
+              </el-button>
+            </template>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
+
+    <el-dialog
+      v-model="reserveDialogVisible"
+      title="预约车位"
+      width="420px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="reserveForm" label-width="100px">
+        <el-form-item label="车位编号">
+          <span>{{ reserveForm.spotCode }}</span>
+        </el-form-item>
+        <el-form-item label="车牌号">
+          <el-input v-model="reserveForm.plateNumber" placeholder="请输入车牌号（可选）" />
+        </el-form-item>
+        <el-form-item label="预约日期">
+          <el-date-picker
+            v-model="reserveForm.date"
+            type="date"
+            placeholder="选择日期"
+            :disabled-date="disablePastDate"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="开始时间">
+          <el-select v-model="reserveForm.startTime" placeholder="选择开始时间" style="width: 100%">
+            <el-option
+              v-for="t in timeOptions"
+              :key="'start-' + t.value"
+              :label="t.label"
+              :value="t.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="结束时间">
+          <el-select v-model="reserveForm.endTime" placeholder="选择结束时间" style="width: 100%">
+            <el-option
+              v-for="t in endTimeOptions"
+              :key="'end-' + t.value"
+              :label="t.label"
+              :value="t.value"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="reserveDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitReservation" :loading="reserveLoading">确认预约</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -116,20 +180,61 @@ import { ref, reactive, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { parkingApi } from '@/api/parking';
+import { reservationsApi } from '@/api/reservations';
 import type { Spot, SpotStatus, SpotType } from '@/types';
 
 const route = useRoute();
 const loading = ref(false);
-const spots = ref<Spot[]>([]);
+const spots = ref<any[]>([]);
 
 const searchForm = reactive({
   status: '',
 });
 
+const reserveDialogVisible = ref(false);
+const reserveLoading = ref(false);
+const reserveForm = reactive({
+  spotId: '',
+  spotCode: '',
+  plateNumber: '',
+  date: '' as any,
+  startTime: '',
+  endTime: '',
+});
+
 const filteredSpots = computed(() => {
   if (!searchForm.status) return spots.value;
+  if (searchForm.status === 'RESERVED') {
+    return spots.value.filter((s) => s.status === 'AVAILABLE' && s.isReserved);
+  }
   return spots.value.filter((s) => s.status === searchForm.status);
 });
+
+const generateTimeOptions = () => {
+  const options: { value: string; label: string }[] = [];
+  for (let h = 0; h < 24; h++) {
+    for (let m = 0; m < 60; m += 30) {
+      const hh = String(h).padStart(2, '0');
+      const mm = String(m).padStart(2, '0');
+      const value = `${hh}:${mm}`;
+      options.push({ value, label: value });
+    }
+  }
+  return options;
+};
+
+const timeOptions = generateTimeOptions();
+
+const endTimeOptions = computed(() => {
+  if (!reserveForm.startTime) return timeOptions;
+  return timeOptions.filter((t) => t.value > reserveForm.startTime);
+});
+
+const disablePastDate = (date: Date) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date < today;
+};
 
 const getSpotTypeLabel = (type?: SpotType) => {
   if (!type) return '-';
@@ -169,6 +274,26 @@ const getStatusTag = (status: SpotStatus) => {
   return tags[status];
 };
 
+const getEffectiveStatusLabel = (spot: any) => {
+  if (spot.status === 'AVAILABLE' && spot.isReserved) return '已预约';
+  return getStatusLabel(spot.status);
+};
+
+const getEffectiveStatusTag = (spot: any) => {
+  if (spot.status === 'AVAILABLE' && spot.isReserved) return 'warning';
+  return getStatusTag(spot.status);
+};
+
+const getSpotItemClass = (spot: any) => {
+  if (spot.status === 'AVAILABLE' && spot.isReserved) {
+    return ['status-reserved', { 'can-toggle': false }];
+  }
+  return [
+    `status-${spot.status.toLowerCase()}`,
+    { 'can-toggle': spot.status !== 'OCCUPIED' },
+  ];
+};
+
 const loadSpots = async () => {
   loading.value = true;
   try {
@@ -190,9 +315,13 @@ const resetSearch = () => {
   searchForm.status = '';
 };
 
-const handleSpotClick = (spot: Spot) => {
+const handleSpotClick = (spot: any) => {
   if (spot.status === 'OCCUPIED') {
     ElMessage.info('该车位已被占用');
+    return;
+  }
+  if (spot.status === 'AVAILABLE' && spot.isReserved) {
+    ElMessage.info('该车位已被预约');
     return;
   }
   if (spot.status === 'AVAILABLE') {
@@ -231,6 +360,73 @@ const toggleMaintenance = async (spot: Spot, toMaintenance: boolean) => {
     loadSpots();
   } catch (error) {
     ElMessage.error('操作失败');
+  }
+};
+
+const openReserveDialog = (spot: any) => {
+  reserveForm.spotId = spot.id;
+  reserveForm.spotCode = spot.code;
+  reserveForm.plateNumber = '';
+  reserveForm.date = new Date();
+  reserveForm.startTime = '';
+  reserveForm.endTime = '';
+  reserveDialogVisible.value = true;
+};
+
+const submitReservation = async () => {
+  if (!reserveForm.date) {
+    ElMessage.warning('请选择预约日期');
+    return;
+  }
+  if (!reserveForm.startTime) {
+    ElMessage.warning('请选择开始时间');
+    return;
+  }
+  if (!reserveForm.endTime) {
+    ElMessage.warning('请选择结束时间');
+    return;
+  }
+
+  const d = new Date(reserveForm.date);
+  const [startH, startM] = reserveForm.startTime.split(':').map(Number);
+  const [endH, endM] = reserveForm.endTime.split(':').map(Number);
+
+  const startDt = new Date(d);
+  startDt.setHours(startH, startM, 0, 0);
+  const endDt = new Date(d);
+  endDt.setHours(endH, endM, 0, 0);
+
+  if (endDt <= startDt) {
+    ElMessage.warning('结束时间必须晚于开始时间');
+    return;
+  }
+
+  const durationMinutes = (endDt.getTime() - startDt.getTime()) / (1000 * 60);
+  if (durationMinutes < 30) {
+    ElMessage.warning('预约时长最少30分钟');
+    return;
+  }
+  if (durationMinutes % 30 !== 0) {
+    ElMessage.warning('预约时长必须为30分钟的整数倍');
+    return;
+  }
+
+  reserveLoading.value = true;
+  try {
+    await reservationsApi.create({
+      spotId: reserveForm.spotId,
+      startTime: startDt.toISOString(),
+      endTime: endDt.toISOString(),
+      plateNumber: reserveForm.plateNumber || undefined,
+    });
+    ElMessage.success('预约成功');
+    reserveDialogVisible.value = false;
+    loadSpots();
+  } catch (error: any) {
+    const msg = error?.response?.data?.message || '预约失败';
+    ElMessage.error(msg);
+  } finally {
+    reserveLoading.value = false;
   }
 };
 
@@ -275,6 +471,10 @@ onMounted(() => {
 
     &.available {
       background: #67c23a;
+    }
+
+    &.reserved {
+      background: #e6a23c;
     }
 
     &.occupied {
@@ -322,6 +522,10 @@ onMounted(() => {
 
   &.status-available {
     background: #67c23a;
+  }
+
+  &.status-reserved {
+    background: #e6a23c;
   }
 
   &.status-occupied {
