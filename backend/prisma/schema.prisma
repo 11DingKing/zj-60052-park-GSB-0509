@@ -1,0 +1,130 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  PARKING_ATTENDANT
+}
+
+enum ZoneType {
+  SMALL
+  LARGE
+  VIP
+}
+
+enum SpotStatus {
+  AVAILABLE
+  OCCUPIED
+  MAINTENANCE
+}
+
+enum ParkingRecordStatus {
+  PARKING
+  COMPLETED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  password     String
+  role         UserRole @default(PARKING_ATTENDANT)
+  name         String
+  phone        String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("users")
+}
+
+model Parking {
+  id           String   @id @default(uuid())
+  name         String
+  address      String
+  totalSpots   Int
+  description  String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  zones        Zone[]
+
+  @@map("parkings")
+}
+
+model Zone {
+  id           String   @id @default(uuid())
+  parkingId    String
+  name         String
+  code         String
+  totalSpots   Int
+  type         ZoneType @default(SMALL)
+  firstHourRate    Float
+  subsequentRate   Float
+  description  String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  parking      Parking  @relation(fields: [parkingId], references: [id], onDelete: Cascade)
+  spots        Spot[]
+  monthlyCards MonthlyCard[]
+
+  @@unique([parkingId, code])
+  @@map("zones")
+}
+
+model Spot {
+  id           String   @id @default(uuid())
+  zoneId       String
+  code         String
+  number       Int
+  status       SpotStatus @default(AVAILABLE)
+  description  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  zone         Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+  records      ParkingRecord[]
+
+  @@unique([zoneId, number])
+  @@map("spots")
+}
+
+model MonthlyCard {
+  id           String   @id @default(uuid())
+  plateNumber  String   @unique
+  ownerName    String
+  phone        String
+  zoneId       String
+  startDate    DateTime
+  endDate      DateTime
+  fee          Float
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  zone         Zone     @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@map("monthly_cards")
+}
+
+model ParkingRecord {
+  id           String               @id @default(uuid())
+  plateNumber  String
+  spotId       String
+  entryTime    DateTime             @default(now())
+  exitTime     DateTime?
+  duration     Int?
+  amount       Float?
+  isMonthly    Boolean              @default(false)
+  status       ParkingRecordStatus  @default(PARKING)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  spot         Spot                 @relation(fields: [spotId], references: [id], onDelete: Cascade)
+
+  @@map("parking_records")
+}

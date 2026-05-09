@@ -1,0 +1,163 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  height: 100%;
+  width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.spot-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.spot-item {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.spot-item.available {
+  background-color: #67c23a;
+  color: white;
+}
+
+.spot-item.occupied {
+  background-color: #f56c6c;
+  color: white;
+}
+
+.spot-item.maintenance {
+  background-color: #909399;
+  color: white;
+}
+
+.spot-item:hover {
+  transform: scale(1.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.stat-card {
+  border-radius: 8px;
+  padding: 20px;
+  transition: all 0.3s;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.chart-container {
+  width: 100%;
+  height: 300px;
+}
+
+.zone-card {
+  margin-bottom: 20px;
+}
+
+.zone-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.zone-stats {
+  display: flex;
+  gap: 16px;
+  font-size: 14px;
+}
+
+.page-container {
+  padding: 20px;
+}
+
+.search-bar {
+  margin-bottom: 16px;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.receipt-container {
+  max-width: 400px;
+  margin: 0 auto;
+  padding: 20px;
+  border: 1px dashed #909399;
+  background-color: #fafafa;
+}
+
+.receipt-title {
+  text-align: center;
+  font-size: 18px;
+  font-weight: bold;
+  margin-bottom: 20px;
+}
+
+.receipt-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px dotted #dcdfe6;
+}
+
+.receipt-label {
+  color: #909399;
+}
+
+.receipt-value {
+  font-weight: 500;
+}
+
+.receipt-amount {
+  text-align: center;
+  padding: 16px 0;
+  font-size: 24px;
+  font-weight: bold;
+  color: #e6a23c;
+}
+
+.receipt-footer {
+  text-align: center;
+  margin-top: 20px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.big-number {
+  font-size: 48px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.big-number-label {
+  font-size: 14px;
+  color: #909399;
+  margin-top: 8px;
+}
