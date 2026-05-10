@@ -62,6 +62,16 @@ export interface Zone {
   updatedAt: string
 }
 
+export interface Reservation {
+  id: string
+  spotId: string
+  plateNumber: string
+  startTime: string
+  endTime: string
+  createdAt: string
+  spot?: Spot
+}
+
 export interface Spot {
   id: string
   zoneId: string
@@ -72,6 +82,8 @@ export interface Spot {
   createdAt: string
   updatedAt: string
   zone?: Zone
+  activeReservation?: Reservation
+  effectiveStatus?: string
 }
 
 export interface MonthlyCard {

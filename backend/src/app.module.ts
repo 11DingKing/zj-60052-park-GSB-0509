@@ -11,6 +11,7 @@ import { ParkingRecordsModule } from './parking-records/parking-records.module';
 import { StatisticsModule } from './statistics/statistics.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RedisModule } from './redis/redis.module';
+import { ReservationsModule } from './reservations/reservations.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
 
@@ -29,6 +30,7 @@ import { RolesGuard } from './auth/guards/roles.guard';
     MonthlyCardsModule,
     ParkingRecordsModule,
     StatisticsModule,
+    ReservationsModule,
   ],
   providers: [
     {

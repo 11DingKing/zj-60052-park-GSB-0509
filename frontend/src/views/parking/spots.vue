@@ -9,7 +9,11 @@
 
       <el-form :inline="true" :model="searchForm" class="search-form">
         <el-form-item label="车位状态">
-          <el-select v-model="searchForm.status" placeholder="全部状态" clearable>
+          <el-select
+            v-model="searchForm.status"
+            placeholder="全部状态"
+            clearable
+          >
             <el-option label="空闲" value="AVAILABLE" />
             <el-option label="占用" value="OCCUPIED" />
             <el-option label="维修" value="MAINTENANCE" />
@@ -53,7 +57,12 @@
 
       <el-divider />
 
-      <el-table :data="filteredSpots" stripe style="width: 100%" v-loading="loading">
+      <el-table
+        :data="filteredSpots"
+        stripe
+        style="width: 100%"
+        v-loading="loading"
+      >
         <el-table-column prop="code" label="车位编号" width="120">
           <template #default="{ row }">
             <span class="spot-code-table">{{ row.code }}</span>
@@ -96,12 +105,7 @@
             >
               恢复可用
             </el-button>
-            <el-button
-              v-else
-              type="info"
-              size="small"
-              disabled
-            >
+            <el-button v-else type="info" size="small" disabled>
               占用中
             </el-button>
           </template>
@@ -112,23 +116,130 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue';
-import { useRoute } from 'vue-router';
-import { ElMessage, ElMessageBox } from 'element-plus';
-import { parkingApi } from '@/api/parking';
-import type { Spot, SpotStatus, SpotType } from '@/types';
+import { ref, reactive, computed, onMounted } from "vue";
+import { useRoute } from "vue-router";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { parkingApi } from "@/api/parking";
+import type { Spot, SpotStatus, SpotType } from "@/types";
 
 const route = useRoute();
 const loading = ref(false);
 const spots = ref<Spot[]>([]);
 
 const searchForm = reactive({
-  status: '',
+  status: "",
 });
 
 const filteredSpots = computed(() => {
   if (!searchForm.status) return spots.value;
   return spots.value.filter((s) => s.status === searchForm.status);
+});
+
+const getSpotTypeLabel = (type?: SpotType) => {
+  if (!type) return "-";
+  const labels: Record<SpotType, string> = {
+    SMALL: "小型车位",
+    LARGE: "大型车位",
+    VIP: "VIP车位",
+  };
+  return labels[type];
+};
+
+const getSpotTypeTag = (type?: SpotType) => {
+  if (!type) return "info";
+  const tags: Record<SpotType, string> = {
+    SMALL: "primary",
+    LARGE: "warning",
+    VIP: "success",
+  };
+  return tags[type];
+};
+
+const getStatusLabel = (status: SpotStatus) => {
+  const labels: Record<SpotStatus, string> = {
+    AVAILABLE: "空闲",
+    OCCUPIED: "占用",
+    MAINTENANCE: "维修",
+  };
+  return labels[status];
+};
+
+const getStatusTag = (status: SpotStatus) => {
+  const tags: Record<SpotStatus, string> = {
+    AVAILABLE: "success",
+    OCCUPIED: "danger",
+    MAINTENANCE: "info",
+  };
+  return tags[status];
+};
+
+const loadSpots = async () => {
+  loading.value = true;
+  try {
+    const response = await parkingApi.getSpots();
+    const zoneId = route.query.zoneId as string;
+    if (zoneId) {
+      spots.value = response.data.filter((s: Spot) => s.zoneId === zoneId);
+    } else {
+      spots.value = response.data;
+    }
+  } catch (error) {
+    ElMessage.error("加载数据失败");
+  } finally {
+    loading.value = false;
+  }
+};
+
+const resetSearch = () => {
+  searchForm.status = "";
+};
+
+const handleSpotClick = (spot: Spot) => {
+  if (spot.status === "OCCUPIED") {
+    ElMessage.info("该车位已被占用");
+    return;
+  }
+  if (spot.status === "AVAILABLE") {
+    ElMessageBox.confirm(
+      `确定要将车位 ${spot.code} 设为维修状态吗？`,
+      "状态确认",
+      {
+        confirmButtonText: "确定",
+        cancelButtonText: "取消",
+        type: "warning",
+      },
+    )
+      .then(() => toggleMaintenance(spot, true))
+      .catch(() => {});
+  } else {
+    ElMessageBox.confirm(
+      `确定要将车位 ${spot.code} 恢复为可用状态吗？`,
+      "状态确认",
+      {
+        confirmButtonText: "确定",
+        cancelButtonText: "取消",
+        type: "warning",
+      },
+    )
+      .then(() => toggleMaintenance(spot, false))
+      .catch(() => {});
+  }
+};
+
+const toggleMaintenance = async (spot: Spot, toMaintenance: boolean) => {
+  try {
+    await parkingApi.updateSpot(spot.id, {
+      status: toMaintenance ? "MAINTENANCE" : "AVAILABLE",
+    });
+    ElMessage.success("状态更新成功");
+    loadSpots();
+  } catch (error) {
+    ElMessage.error("操作失败"
+};
+
+const filteredSpots = computed(() => {
+  if (!searchForm.status) return spots.value;
+  return spots.value.filter((s) => getDisplayStatus(s) === searchForm.status);
 });
 
 const getSpotTypeLabel = (type?: SpotType) => {
@@ -151,22 +262,29 @@ const getSpotTypeTag = (type?: SpotType) => {
   return tags[type];
 };
 
-const getStatusLabel = (status: SpotStatus) => {
-  const labels: Record<SpotStatus, string> = {
+const getStatusLabel = (status: string) => {
+  const labels: Record<string, string> = {
     AVAILABLE: '空闲',
+    RESERVED: '已预约',
     OCCUPIED: '占用',
     MAINTENANCE: '维修',
   };
-  return labels[status];
+  return labels[status] || status;
 };
 
-const getStatusTag = (status: SpotStatus) => {
-  const tags: Record<SpotStatus, string> = {
+const getStatusTag = (status: string) => {
+  const tags: Record<string, string> = {
     AVAILABLE: 'success',
+    RESERVED: 'warning',
     OCCUPIED: 'danger',
     MAINTENANCE: 'info',
   };
-  return tags[status];
+  return tags[status] || 'info';
+};
+
+const formatTime = (time: string) => {
+  const date = new Date(time);
+  return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 };
 
 const loadSpots = async () => {
@@ -179,10 +297,36 @@ const loadSpots = async () => {
     } else {
       spots.value = response.data;
     }
+    await loadReservationsForSpots();
   } catch (error) {
     ElMessage.error('加载数据失败');
   } finally {
     loading.value = false;
+  }
+};
+
+const loadReservationsForSpots = async () => {
+  try {
+    const allReservations = await reservationsApi.getAllReservations();
+    const now = new Date();
+    const bufferMinutes = 15;
+
+    for (const spot of spots.value) {
+      const spotReservations = allReservations.data.filter(
+        (r: Reservation) => r.spotId === spot.id
+      );
+      for (const reservation of spotReservations) {
+        const start = new Date(reservation.startTime);
+        const bufferStart = new Date(start.getTime() - bufferMinutes * 60 * 1000);
+        const end = new Date(reservation.endTime);
+        if (now >= bufferStart && now <= end) {
+          spot.activeReservation = reservation;
+          break;
+        }
+      }
+    }
+  } catch (error) {
+    console.error('加载预约信息失败', error);
   }
 };
 
@@ -193,6 +337,10 @@ const resetSearch = () => {
 const handleSpotClick = (spot: Spot) => {
   if (spot.status === 'OCCUPIED') {
     ElMessage.info('该车位已被占用');
+    return;
+  }
+  if (spot.activeReservation) {
+    ElMessage.info('该车位已被预约');
     return;
   }
   if (spot.status === 'AVAILABLE') {
@@ -231,6 +379,120 @@ const toggleMaintenance = async (spot: Spot, toMaintenance: boolean) => {
     loadSpots();
   } catch (error) {
     ElMessage.error('操作失败');
+  }
+};
+
+const openReservationDialog = (spot: Spot) => {
+  selectedSpot.value = spot;
+  reservationForm.plateNumber = '';
+  const now = new Date();
+  now.setMinutes(Math.ceil(now.getMinutes() / 30) * 30);
+  now.setSeconds(0);
+  reservationForm.startTime = now.toISOString().slice(0, 19);
+  const endTime = new Date(now.getTime() + 30 * 60 * 1000);
+  reservationForm.endTime = endTime.toISOString().slice(0, 19);
+  reservationDialogVisible.value = true;
+};
+
+const disableStartDate = (date: Date) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date < today;
+};
+
+const disableEndDate = (date: Date) => {
+  if (!reservationForm.startTime) return false;
+  const startDate = new Date(reservationForm.startTime);
+  return date < startDate;
+};
+
+const getDurationText = () => {
+  if (!reservationForm.startTime || !reservationForm.endTime) return '-';
+  const start = new Date(reservationForm.startTime);
+  const end = new Date(reservationForm.endTime);
+  const diffMs = end.getTime() - start.getTime();
+  if (diffMs <= 0) return '请选择有效时间';
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  const hours = Math.floor(diffMinutes / 60);
+  const minutes = diffMinutes % 60;
+  if (hours === 0) return `${minutes}分钟`;
+  if (minutes === 0) return `${hours}小时`;
+  return `${hours}小时${minutes}分钟`;
+};
+
+const validateTimeRange = () => {
+  if (!reservationForm.startTime || !reservationForm.endTime) {
+    return { valid: false, message: '请选择时间' };
+  }
+  const start = new Date(reservationForm.startTime);
+  const end = new Date(reservationForm.endTime);
+  const now = new Date();
+  if (start <= now) {
+    return { valid: false, message: '开始时间必须晚于当前时间' };
+  }
+  if (end <= start) {
+    return { valid: false, message: '结束时间必须晚于开始时间' };
+  }
+  const diffMs = end.getTime() - start.getTime();
+  const diffMinutes = diffMs / (1000 * 60);
+  if (diffMinutes < 30) {
+    return { valid: false, message: '预约时长至少为30分钟' };
+  }
+  if (diffMinutes % 30 !== 0) {
+    return { valid: false, message: '预约时长必须为30分钟的整数倍' };
+  }
+  if (start.getMinutes() % 30 !== 0 || end.getMinutes() % 30 !== 0) {
+    return { valid: false, message: '时间必须选择30分钟整点（如 10:00、10:30）' };
+  }
+  return { valid: true };
+};
+
+const submitReservation = async () => {
+  if (!reservationFormRef.value || !selectedSpot.value) return;
+  await reservationFormRef.value.validate(async (valid) => {
+    if (!valid) return;
+    const validation = validateTimeRange();
+    if (!validation.valid) {
+      ElMessage.error(validation.message);
+      return;
+    }
+    submitting.value = true;
+    try {
+      await reservationsApi.createReservation({
+        spotId: selectedSpot.value.id,
+        plateNumber: reservationForm.plateNumber,
+        startTime: reservationForm.startTime,
+        endTime: reservationForm.endTime,
+      });
+      ElMessage.success('预约成功');
+      reservationDialogVisible.value = false;
+      loadSpots();
+    } catch (error: any) {
+      ElMessage.error(error.response?.data?.message || '预约失败');
+    } finally {
+      submitting.value = false;
+    }
+  });
+};
+
+const cancelReservation = async (reservation: Reservation) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要取消预约吗？`,
+      '取消预约',
+      {
+        confirmButtonText: '确定取消',
+        cancelButtonText: '返回',
+        type: 'warning',
+      }
+    );
+    await reservationsApi.cancelReservation(reservation.id, reservation.plateNumber);
+    ElMessage.success('预约已取消');
+    loadSpots();
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('取消预约失败');
+    }
   }
 };
 
@@ -277,6 +539,10 @@ onMounted(() => {
       background: #67c23a;
     }
 
+    &.reserved {
+      background: #e6a23c;
+    }
+
     &.occupied {
       background: #f56c6c;
     }
@@ -304,6 +570,7 @@ onMounted(() => {
   cursor: default;
   transition: all 0.3s;
   border: 2px solid transparent;
+  position: relative;
 
   &.can-toggle {
     cursor: pointer;
@@ -320,8 +587,23 @@ onMounted(() => {
     color: #fff;
   }
 
+  .spot-badge {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    background: #e6a23c;
+    color: #fff;
+    font-size: 10px;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+
   &.status-available {
     background: #67c23a;
+  }
+
+  &.status-reserved {
+    background: #e6a23c;
   }
 
   &.status-occupied {
@@ -336,5 +618,14 @@ onMounted(() => {
 .spot-code-table {
   font-weight: bold;
   color: #409eff;
+}
+
+.reservation-info {
+  font-size: 12px;
+  line-height: 1.4;
+
+  .reservation-time {
+    color: #606266;
+  }
 }
 </style>
