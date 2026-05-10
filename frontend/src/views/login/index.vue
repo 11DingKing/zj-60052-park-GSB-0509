@@ -83,21 +83,23 @@ const loginRules: FormRules = {
 
 const handleLogin = async () => {
   if (!loginFormRef.value) return
-  
-  await loginFormRef.value.validate(async (valid) => {
-    if (valid) {
-      loading.value = true
-      try {
-        await userStore.login(loginForm.username, loginForm.password)
-        ElMessage.success('登录成功')
-        router.push('/dashboard')
-      } catch (error: any) {
-        ElMessage.error(error.response?.data?.message || '登录失败')
-      } finally {
-        loading.value = false
-      }
-    }
-  })
+
+  try {
+    await loginFormRef.value.validate()
+  } catch {
+    return
+  }
+
+  loading.value = true
+  try {
+    await userStore.login(loginForm.username, loginForm.password)
+    ElMessage.success('登录成功')
+    router.push('/dashboard')
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '登录失败')
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
