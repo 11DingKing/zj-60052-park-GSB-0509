@@ -15,14 +15,14 @@ export class SpotsController {
   constructor(private spotsService: SpotsService) {}
 
   @Get()
-  @ApiOperation({ summary: '获取车位列表' })
+  @ApiOperation({ summary: '获取车位列表（含预约信息）' })
   @ApiQuery({ name: 'zoneId', required: false, description: '区域ID' })
   @ApiQuery({ name: 'status', required: false, enum: SpotStatus, description: '车位状态' })
   async findAll(
     @Query('zoneId') zoneId?: string,
     @Query('status') status?: SpotStatus,
   ) {
-    return this.spotsService.findAll(zoneId, status);
+    return this.spotsService.findAllWithReservations(zoneId, status);
   }
 
   @Get('available')
