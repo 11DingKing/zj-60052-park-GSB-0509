@@ -3,12 +3,25 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Spot, SpotStatus } from '@prisma/client';
 import { UpdateSpotDto } from './dto/update-spot.dto';
 import { ParkingService } from '../parking/parking.service';
+import { RedisService } from '../redis/redis.service';
+
+const RESERVATION_KEY_PREFIX = 'reservation:';
+const BUFFER_MINUTES = 15;
+
+interface ReservationInfo {
+  id: string;
+  spotId: string;
+  plateNumber: string;
+  startTime: string;
+  endTime: string;
+}
 
 @Injectable()
 export class SpotsService {
   constructor(
     private prisma: PrismaService,
     private parkingService: ParkingService,
+    private redisService: RedisService,
   ) {}
 
   async findAll(zoneId?: string, status?: SpotStatus): Promise<Spot[]> {
@@ -133,6 +146,60 @@ export class SpotsService {
       occupied: spots.filter(s => s.status === SpotStatus.OCCUPIED).length,
       maintenance: spots.filter(s => s.status === SpotStatus.MAINTENANCE).length,
     };
+
+    return result;
+  }
+
+  private async getSpotReservations(spotId: string): Promise<ReservationInfo[]> {
+    const keys = await this.redisService.keys(`${RESERVATION_KEY_PREFIX}*`);
+    const reservations: ReservationInfo[] = [];
+
+    for (const key of keys) {
+      const data = await this.redisService.get(key);
+      if (data) {
+        try {
+          const reservation = JSON.parse(data) as ReservationInfo;
+          if (reservation.spotId === spotId) {
+            reservations.push(reservation);
+          }
+        } catch {
+          // 忽略解析错误
+        }
+      }
+    }
+
+    return reservations;
+  }
+
+  async getSpotActiveReservation(spotId: string): Promise<ReservationInfo | null> {
+    const reservations = await this.getSpotReservations(spotId);
+    const now = new Date();
+
+    for (const reservation of reservations) {
+      const start = new Date(reservation.startTime);
+      const bufferStart = new Date(start.getTime() - BUFFER_MINUTES * 60 * 1000);
+      const end = new Date(reservation.endTime);
+
+      if (now >= bufferStart && now <= end) {
+        return reservation;
+      }
+    }
+
+    return null;
+  }
+
+  async findAllWithReservations(zoneId?: string, status?: SpotStatus): Promise<any[]> {
+    const spots = await this.findAll(zoneId, status);
+    const result = [];
+
+    for (const spot of spots) {
+      const reservation = await this.getSpotActiveReservation(spot.id);
+      result.push({
+        ...spot,
+        activeReservation: reservation,
+        effectiveStatus: reservation ? 'RESERVED' : spot.status,
+      });
+    }
 
     return result;
   }

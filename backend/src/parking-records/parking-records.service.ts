@@ -6,6 +6,7 @@ import { ExitDto } from './dto/exit.dto';
 import { SpotsService } from '../spots/spots.service';
 import { MonthlyCardsService } from '../monthly-cards/monthly-cards.service';
 import { ParkingService } from '../parking/parking.service';
+import { PricingService } from './pricing.service';
 
 @Injectable()
 export class ParkingRecordsService {
@@ -14,6 +15,7 @@ export class ParkingRecordsService {
     private spotsService: SpotsService,
     private monthlyCardsService: MonthlyCardsService,
     private parkingService: ParkingService,
+    private pricingService: PricingService,
   ) {}
 
   async findAll(status?: ParkingRecordStatus, plateNumber?: string): Promise<any[]> {
@@ -127,22 +129,10 @@ export class ParkingRecordsService {
     const exitTime = new Date();
     const durationMs = exitTime.getTime() - entryTime.getTime();
     const durationMinutes = Math.ceil(durationMs / (1000 * 60));
-    const durationHours = Math.ceil(durationMinutes / 60);
 
-    let amount = 0;
-    let isMonthlyFree = false;
-
-    if (monthlyCard) {
-      isMonthlyFree = true;
-      amount = 0;
-    } else {
-      const zone = record.spot.zone as Zone;
-      if (durationHours <= 1) {
-        amount = zone.firstHourRate;
-      } else {
-        amount = zone.firstHourRate + (durationHours - 1) * zone.subsequentRate;
-      }
-    }
+    const isMonthlyFree = !!monthlyCard;
+    const pricingResult = this.pricingService.calculate(durationMinutes, isMonthlyFree);
+    const amount = pricingResult.amount;
 
     return this.prisma.$transaction(async (prisma) => {
       const updatedRecord = await prisma.parkingRecord.update({
@@ -178,21 +168,11 @@ export class ParkingRecordsService {
         amount: updatedRecord.amount,
         isMonthly: updatedRecord.isMonthly,
         isMonthlyFree,
-        rateDetail: isMonthlyFree
-          ? '月卡免费'
-          : this.buildRateDetail(updatedRecord.spot.zone as Zone, durationHours),
+        rateDetail: pricingResult.rateDetail,
       };
 
       return receipt;
     });
-  }
-
-  private buildRateDetail(zone: Zone, durationHours: number): string {
-    if (durationHours <= 1) {
-      return `首小时 ${zone.firstHourRate} 元`;
-    }
-    const subsequentHours = durationHours - 1;
-    return `首小时 ${zone.firstHourRate} 元 + ${subsequentHours} 小时 × ${zone.subsequentRate} 元/小时 = ${zone.firstHourRate + subsequentHours * zone.subsequentRate} 元`;
   }
 
   async getCurrentParkings(plateNumber?: string): Promise<any[]> {
